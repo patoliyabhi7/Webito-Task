@@ -1,5 +1,6 @@
 const express = require('express')
 const userRouter = require('./routes/userRoutes.js');
+const membershipRouter = require('./routes/membershipRoutes.js');
 const cookieParser = require('cookie-parser');
 
 const app = express();
@@ -11,5 +12,6 @@ app.get('/', (req, res) => {
 })
 
 app.use('/api/v1/users', userRouter);
+app.use('/api/v1/membership', membershipRouter);
 
 module.exports = app;

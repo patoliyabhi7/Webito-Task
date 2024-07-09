@@ -1,4 +1,3 @@
-const express = require('express')
 const User = require('./../model/userModel')
 const sendEmail = require('./../utils/email')
 const appError = require('./../utils/appError')
@@ -62,7 +61,7 @@ exports.verifyJWT = async (req, res, next) => {
     }
 };
 
-exports.register = catchAsync(async (req, res) => {
+exports.register = catchAsync(async (req, res, next) => {
     const newUser = await User.create({
         email: req.body.email,
         username: req.body.username,
@@ -84,7 +83,7 @@ exports.register = catchAsync(async (req, res) => {
     })
 })
 
-exports.login = catchAsync(async (req, res) => {
+exports.login = catchAsync(async (req, res, next) => {
     try {
         const { email, password } = req.body;
         if (!email || !password) {
@@ -112,7 +111,7 @@ exports.login = catchAsync(async (req, res) => {
     }
 })
 
-exports.forgotPassword = catchAsync(async (req, res) => {
+exports.forgotPassword = catchAsync(async (req, res, next) => {
     try {
         if (!req.body.email) {
             return res.status(400).json({
@@ -157,7 +156,7 @@ exports.forgotPassword = catchAsync(async (req, res) => {
     }
 })
 
-exports.verifyOTP = catchAsync(async (req, res) => {
+exports.verifyOTP = catchAsync(async (req, res, next) => {
     try {
         const enteredOtp = req.body.otp;
         const user = await User.findById(req.user.id)
@@ -198,7 +197,7 @@ exports.verifyOTP = catchAsync(async (req, res) => {
     }
 })
 
-exports.updatePassword = catchAsync(async (req, res) => {
+exports.updatePassword = catchAsync(async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id).select('+password');
         if (!user) {
@@ -228,7 +227,7 @@ exports.updatePassword = catchAsync(async (req, res) => {
     }
 })
 
-exports.viewProfile = catchAsync(async (req, res) => {
+exports.viewProfile = catchAsync(async (req, res, next) => {
     res.status(200).json({
         status: 'success',
         message: 'User profile fetched successfully',

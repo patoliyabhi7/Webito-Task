@@ -59,6 +59,14 @@ const userSchema = new mongoose.Schema({
     education: {
         type: String,
     },
+    membership_plan: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Membership'
+    }],
+    membership_history: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'UserMembership'
+    }],
 })
 
 userSchema.pre('save', async function(next){

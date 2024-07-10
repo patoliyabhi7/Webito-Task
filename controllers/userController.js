@@ -1,4 +1,5 @@
 const User = require('./../model/userModel')
+const Membership = require('./../model/membershipModel')
 const sendEmail = require('./../utils/email')
 const appError = require('./../utils/appError')
 const catchAsync = require('./../utils/catchAsync')
@@ -45,7 +46,7 @@ exports.verifyJWT = async (req, res, next) => {
         }
 
         if (!token) {
-            return res.status(401).json({ message: "Unauthorized request" });
+            return res.status(401).json({ message: "User not logged in or Unauthorized request" });
         }
         const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decodedToken.id).select("-password");
@@ -236,3 +237,4 @@ exports.viewProfile = catchAsync(async (req, res, next) => {
         }
     });
 });
+

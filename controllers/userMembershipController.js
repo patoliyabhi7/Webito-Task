@@ -4,6 +4,7 @@ const UserMembership = require('./../model/userMembershipModel')
 const appError = require('./../utils/appError')
 const catchAsync = require('./../utils/catchAsync')
 const sendEmail = require('./../utils/email');
+const mongoose = require('mongoose');
 
 exports.purchaseMembership = catchAsync(async (req, res, next) => {
     const user = await User.findById(req.user.id).populate('membership_history').populate('membership_plan');
@@ -92,3 +93,121 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
         return next(new appError('Error while sending email!', 500));
     }
 });
+
+// Show user plan details using lookup
+exports.getMyMemberships = catchAsync(async (req, res, next) => {
+    const userId = req.user.id;
+
+    const user = await User.aggregate([
+        {
+            $match: { _id: new mongoose.Types.ObjectId(userId) }
+        },
+        {
+            $lookup: {
+                from: 'usermemberships',
+                localField: '_id',
+                foreignField: 'userId',
+                as: 'membership_history'
+            }
+        },
+        {
+            $unwind: {
+                path: '$membership_history',
+                preserveNullAndEmptyArrays: true
+            }
+        },
+        {
+            $lookup: {
+                from: 'memberships',
+                localField: 'membership_history.membershipId',
+                foreignField: '_id',
+                as: 'membership_history.membershipId'
+            }
+        },
+        {
+            $unwind: {
+                path: '$membership_history.membershipId',
+                preserveNullAndEmptyArrays: true
+            }
+        },
+        {
+            $group: {
+                _id: '$_id',
+                name: { $first: '$name' },
+                email: { $first: '$email' },
+                username: { $first: '$username' },
+                membership_history: { $push: '$membership_history' }
+            }
+        }
+    ]);
+
+    if (!user || user.length === 0) {
+        return next(new appError('Membership not found.', 404));
+    }
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            user: user[0]
+        }
+    });
+});
+
+exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
+    // membership details by user_id
+    const userId = req.params.id;
+
+    const user = await User.aggregate([
+        {
+            $match: { _id: new mongoose.Types.ObjectId(userId) }
+        },
+        {
+            $lookup: {
+                from: 'usermemberships',
+                localField: '_id',
+                foreignField: 'userId',
+                as: 'membership_history'
+            }
+        },
+        {
+            $unwind: {
+                path: '$membership_history',
+                preserveNullAndEmptyArrays: true
+            }
+        },
+        {
+            $lookup: {
+                from: 'memberships',
+                localField: 'membership_history.membershipId',
+                foreignField: '_id',
+                as: 'membership_history.membershipId'
+            }
+        },
+        {
+            $unwind: {
+                path: '$membership_history.membershipId',
+                preserveNullAndEmptyArrays: true
+            }
+        },
+        {
+            $group: {
+                _id: '$_id',
+                name: { $first: '$name' },
+                email: { $first: '$email' },
+                username: { $first: '$username' },
+                membership_history: { $push: '$membership_history' }
+            }
+        }
+    ]);
+
+    if (!user || user.length === 0) {
+        return next(new appError('Membership not found.', 404));
+    }
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            user: user[0]
+        }
+    });
+})

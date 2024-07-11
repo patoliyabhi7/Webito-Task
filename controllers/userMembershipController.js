@@ -32,7 +32,7 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
             activeMembership.purchasedOrRenewedOn.push(now);
             await activeMembership.save({ validateBeforeSave: false });
 
-            const message = `You have an existing membership, so your membership has been extended by 30 days. \n
+            const message = `You have an existing membership of same plan, so your membership has been renewed and extended by 30 days. \n
             Membership Name: ${membership.planName} \n
             Amount: ${membership.price} \n
             Start Date: ${activeMembership.startDate} \n
@@ -46,13 +46,13 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
                 });
                 return res.status(200).json({
                     status: 'success',
-                    message: 'You already have an active membership, so it is extended by 30 days.',
+                    message: 'You have an existing membership of same plan, so your membership has been renewed and extended by 30 days.',
                     data: {
                         activeMembership
                     }
                 });
             } catch (err) {
-                return next(new appError('Error while sending email!', 500));
+                return next(new appError('Error while sending the renewal email!', 500));
             }
         }
     }
@@ -92,7 +92,7 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
             }
         });
     } catch (err) {
-        return next(new appError('Error while sending email!', 500));
+        return next(new appError('Error while sending purchased membership email!', 500));
     }
 });
 

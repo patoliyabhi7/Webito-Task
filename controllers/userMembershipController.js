@@ -29,6 +29,7 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
         if (activeMembership.endDate > now) {
             // If active membership, extend the end date by 30 days
             activeMembership.endDate = new Date(activeMembership.endDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+            activeMembership.purchasedOrRenewedOn.push(now);
             await activeMembership.save({ validateBeforeSave: false });
 
             const message = `You have an existing membership, so your membership has been extended by 30 days. \n
@@ -40,7 +41,7 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
             try {
                 await sendEmail({
                     email: user.email,
-                    subject: 'Membership Extended Successfully!',
+                    subject: 'Membership Renewed Successfully!',
                     message
                 });
                 return res.status(200).json({
@@ -59,6 +60,7 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
     const userMembership = await UserMembership.create({
         userId: user.id,
         membershipId: req.params.m_id,
+        purchasedOrRenewedOn: [now]
     })
     if (!userMembership) {
         return next(new appError('Error while purchasing membership!', 500))
@@ -133,9 +135,9 @@ exports.getMyMemberships = catchAsync(async (req, res, next) => {
         {
             $group: {
                 _id: '$_id',
-                name: { $first: '$name' },
-                email: { $first: '$email' },
-                username: { $first: '$username' },
+                name: '$name' ,
+                email: '$email' ,
+                username: '$username' ,
                 membership_history: { $push: '$membership_history' }
             }
         }
@@ -192,9 +194,9 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
         {
             $group: {
                 _id: '$_id',
-                name: { $first: '$name' },
-                email: { $first: '$email' },
-                username: { $first: '$username' },
+                name: '$name' ,
+                email: '$email' ,
+                username: '$username' ,
                 membership_history: { $push: '$membership_history' }
             }
         }
@@ -211,3 +213,82 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
         }
     });
 })
+
+exports.getMembershipSalesReport = catchAsync(async (req, res, next) => {
+    let { startDate, endDate } = req.body;
+
+    if (!startDate && !endDate) {
+        return next(new appError('Please provide start and end date!', 400));
+    }
+
+    if (!endDate) {
+        endDate = startDate;
+    }
+
+    startDate = new Date(startDate);
+    endDate = new Date(endDate);
+    endDate.setUTCHours(23, 59, 59, 999);
+
+    const salesReport = await UserMembership.aggregate([
+        {
+            $unwind: '$purchasedOrRenewedOn'
+        },
+        {
+            $match: {
+                purchasedOrRenewedOn: {
+                    $gte: startDate,
+                    $lte: endDate
+                }
+            }
+        },
+        {
+            $lookup: {
+                from: 'memberships',
+                localField: 'membershipId',
+                foreignField: '_id',
+                as: 'membership_details'
+            }
+        },
+        {
+            $unwind: '$membership_details'
+        },
+        {
+            $group: {
+                _id: {
+                    year: { $year: '$purchasedOrRenewedOn' },
+                    month: { $month: '$purchasedOrRenewedOn' },
+                    day: { $dayOfMonth: '$purchasedOrRenewedOn' }
+                },
+                count: { $sum: 1 },
+                totalAmount: { $sum: '$membership_details.price' }
+            }
+        },
+        {
+            $project: {
+                _id: 0,
+                date: {
+                    $dateToString: {
+                        format: "%Y-%m-%d",
+                        date: {
+                            $dateFromParts: {
+                                year: "$_id.year",
+                                month: "$_id.month",
+                                day: "$_id.day"
+                            }
+                        }
+                    }
+                },
+                membership_quantity: "$count",
+                sales_in_amount: "$totalAmount"
+            }
+        },
+        {
+            $sort: { date: 1 }
+        }
+    ]);
+
+    res.status(200).json({
+        status: 'success',
+        data: salesReport
+    });
+});

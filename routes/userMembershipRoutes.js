@@ -9,5 +9,6 @@ const router = express.Router();
 router.post("/purchaseMembership/:m_id", userController.verifyJWT, userMembershipController.purchaseMembership);
 router.get("/getMyMemberships", userController.verifyJWT, userMembershipController.getMyMemberships);
 router.get("/getMembershipDetailsByUId/:id", userMembershipController.getMembershipDetailsByUId)
+router.get("/getMembershipSalesReport", userMembershipController.getMembershipSalesReport)
 
 module.exports = router;

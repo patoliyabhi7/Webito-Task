@@ -13,21 +13,20 @@ const userMembershipSchema = new mongoose.Schema({
     },
     startDate: {
         type: Date,
-        default: Date.now(),
+        default: Date.now,
         required: [true, 'Start date is required']
     },
     endDate: {
         type: Date,
-        default: function() {
-            return Date.now() + 30*24*60*60*1000;
+        default: function () {
+            return Date.now() + 30 * 24 * 60 * 60 * 1000;
         },
         required: [true, 'End date is required']
     },
-    purchasedOn: {
+    purchasedOrRenewedOn: [{
         type: Date,
-        default: Date.now,
-        required: [true, 'Purchase date is required']
-    }
+        required: [true, 'Purchase or renew date is required']
+    }]
 })
 
 const UserMembership = mongoose.model('UserMembership', userMembershipSchema)

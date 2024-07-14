@@ -5,6 +5,7 @@ const appError = require('./../utils/appError')
 const catchAsync = require('./../utils/catchAsync')
 const sendEmail = require('./../utils/email');
 const mongoose = require('mongoose');
+const cron = require('node-cron');
 
 exports.purchaseMembership = catchAsync(async (req, res, next) => {
     const user = await User.findById(req.user.id).populate('membership_history').populate('membership_plan');
@@ -135,9 +136,9 @@ exports.getMyMemberships = catchAsync(async (req, res, next) => {
         {
             $group: {
                 _id: '$_id',
-                name: '$name' ,
-                email: '$email' ,
-                username: '$username' ,
+                name: '$name',
+                email: '$email',
+                username: '$username',
                 membership_history: { $push: '$membership_history' }
             }
         }
@@ -194,9 +195,9 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
         {
             $group: {
                 _id: '$_id',
-                name: '$name' ,
-                email: '$email' ,
-                username: '$username' ,
+                name: '$name',
+                email: '$email',
+                username: '$username',
                 membership_history: { $push: '$membership_history' }
             }
         }
@@ -214,81 +215,121 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
     });
 })
 
-exports.getMembershipSalesReport = catchAsync(async (req, res, next) => {
-    let { startDate, endDate } = req.body;
+const membershipSalesReport = async (startDate, endDate) => {
+    try {
 
-    if (!startDate && !endDate) {
-        return next(new appError('Please provide start and end date!', 400));
-    }
+        startDate = new Date(startDate);
+        endDate = new Date(endDate);
+        endDate.setUTCHours(23, 59, 59, 999);
 
-    if (!endDate) {
-        endDate = startDate;
-    }
-
-    startDate = new Date(startDate);
-    endDate = new Date(endDate);
-    endDate.setUTCHours(23, 59, 59, 999);
-
-    const salesReport = await UserMembership.aggregate([
-        {
-            $unwind: '$purchasedOrRenewedOn'
-        },
-        {
-            $match: {
-                purchasedOrRenewedOn: {
-                    $gte: startDate,
-                    $lte: endDate
+        return salesReport = await UserMembership.aggregate([
+            {
+                $unwind: '$purchasedOrRenewedOn'
+            },
+            {
+                $match: {
+                    purchasedOrRenewedOn: {
+                        $gte: startDate,
+                        $lte: endDate
+                    }
                 }
-            }
-        },
-        {
-            $lookup: {
-                from: 'memberships',
-                localField: 'membershipId',
-                foreignField: '_id',
-                as: 'membership_details'
-            }
-        },
-        {
-            $unwind: '$membership_details'
-        },
-        {
-            $group: {
-                _id: {
-                    year: { $year: '$purchasedOrRenewedOn' },
-                    month: { $month: '$purchasedOrRenewedOn' },
-                    day: { $dayOfMonth: '$purchasedOrRenewedOn' }
-                },
-                count: { $sum: 1 },
-                totalAmount: { $sum: '$membership_details.price' }
-            }
-        },
-        {
-            $project: {
-                _id: 0,
-                date: {
-                    $dateToString: {
-                        format: "%Y-%m-%d",
-                        date: {
-                            $dateFromParts: {
-                                year: "$_id.year",
-                                month: "$_id.month",
-                                day: "$_id.day"
+            },
+            {
+                $lookup: {
+                    from: 'memberships',
+                    localField: 'membershipId',
+                    foreignField: '_id',
+                    as: 'membership_details'
+                }
+            },
+            {
+                $unwind: '$membership_details'
+            },
+            {
+                $group: {
+                    _id: {
+                        year: { $year: '$purchasedOrRenewedOn' },
+                        month: { $month: '$purchasedOrRenewedOn' },
+                        day: { $dayOfMonth: '$purchasedOrRenewedOn' }
+                    },
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: '$membership_details.price' }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    date: {
+                        $dateToString: {
+                            format: "%Y-%m-%d",
+                            date: {
+                                $dateFromParts: {
+                                    year: "$_id.year",
+                                    month: "$_id.month",
+                                    day: "$_id.day"
+                                }
                             }
                         }
-                    }
-                },
-                membership_quantity: "$count",
-                sales_in_amount: "$totalAmount"
+                    },
+                    membership_quantity: "$count",
+                    sales_in_amount: "$totalAmount"
+                }
+            },
+            {
+                $sort: { date: 1 }
             }
-        },
-        {
-            $sort: { date: 1 }
+        ]);
+    } catch (error) {
+        return next(new appError('Error while fetching sales report using function', 500));
+
+    }
+};
+
+exports.getMembershipSalesReport = catchAsync(async (req, res, next) => {
+    try {
+        let { startDate, endDate } = req.body;
+
+        if (!startDate && !endDate) {
+            return next(new appError('Please provide start and end date!', 400));
         }
-    ]);
+        if (!endDate) {
+            endDate = startDate;
+        }
+
+        let salesReport = await membershipSalesReport(startDate, endDate);
+    } catch (error) {
+        return next(new appError('Error while fetching sales report!', 500));
+    }
 
     res.status(200).json({
         status: 'success',
         data: salesReport
     });
+});
+
+// cron job to email send daily sales report
+cron.schedule('59 59 23 * * *', async () => {
+    try {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setUTCHours(0, 0, 0, 0);
+        const salesReport = await membershipSalesReport(startDate, endDate);
+
+        for (const report of salesReport) {
+            const message = `Sales report for the day: ${report.date} \n
+Membership Quantity: ${report.membership_quantity} \n
+Sales in Amount: ${report.sales_in_amount}`;
+        try {
+            await sendEmail({
+                email: 'sales@gmail.com',
+                subject: `Sales Report for the day: ${new Date().toDateString()}`,
+                message
+            });
+        } catch (err) {
+            return next(new appError('Error while sending purchased membership email!', 500));
+        }
+        }
+    } catch (error) {
+        return next(new appError('Error while fetching sales report', 500));
+    }
 });

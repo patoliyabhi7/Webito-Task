@@ -32,6 +32,10 @@ const userMembershipSchema = new mongoose.Schema({
         type: String,
         enum: ['Active', 'Inactive', 'Matured'],
         default: 'Active'
+    },
+    transactionId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Transaction'
     }
 })
 

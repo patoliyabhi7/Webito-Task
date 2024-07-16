@@ -1,6 +1,7 @@
 const User = require('./../model/userModel')
 const Membership = require('./../model/membershipModel')
 const UserMembership = require('./../model/userMembershipModel')
+const Transaction = require('./../model/transactionModel')
 const appError = require('./../utils/appError')
 const catchAsync = require('./../utils/catchAsync')
 const sendEmail = require('./../utils/email');
@@ -37,6 +38,21 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
     user.membership_history.push(userMembership.id);
 
     await user.save({ validateBeforeSave: false });
+
+    const transaction = await Transaction.create({
+        userId: user.id,
+        userMembershipId: userMembership.id,
+        transactionType: 'credit',
+        amount: investment_amount,
+        note: `Investment done for ${membership.planName} plan`
+    })
+
+    if (!transaction) {
+        return next(new appError('Error while creating transaction!', 500))
+    }
+
+    userMembership.transactionId = transaction.id;
+    await userMembership.save({ validateBeforeSave: false });
 
     // Send email to user
     const message = `Congratulations! You have successfully purchased the plan. \n
@@ -157,7 +173,7 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
             }
         }
     ]);
-    
+
     if (!user || user.length === 0) {
         return next(new appError('Membership not found.', 404));
     }
@@ -259,7 +275,7 @@ exports.getMembershipSalesReport = catchAsync(async (req, res, next) => {
 });
 
 // cron job to email send daily sales report
-cron.schedule('59 59 23 * * *', async () => {
+cron.schedule('* * * * * *', async () => {
     try {
         const endDate = new Date();
         const startDate = new Date();
@@ -284,3 +300,56 @@ Sales in Amount: ${report.sales_in_amount}`;
         return next(new appError('Error while fetching sales report', 500));
     }
 });
+
+// Cron-job to perform the transaction of actual amount & ROI to user account on maturity date
+cron.schedule('59 59 23 * * *', async () => {
+    try {
+        const currentDate = new Date();
+        const userMemberships = await UserMembership.find({ maturityDate: {"$lte": currentDate}, status: 'Active' });
+        if (!userMemberships || userMemberships.length === 0) {
+            return next(new appError(`No user have any maturity on ${currentDate}`, 404));
+        }
+        for(const userMembership of userMemberships){
+            const investedTransaction = await Transaction.create({
+                userId: userMembership.userId,
+                userMembershipId: userMembership.id,
+                transactionType: 'debit',
+                amount: userMembership.investedAmount,
+                note: `Investment amount credited to the user account. Amount ${userMembership.investedAmount}`
+            })
+            const roiTransaction = await Transaction.create({
+                userId: userMembership.userId,
+                userMembershipId: userMembership.id,
+                transactionType: 'debit',
+                amount: userMembership.roiAmount,
+                note: `ROI amount credited to the user account. Amount ${userMembership.roiAmount}`
+            })
+            if (!investedTransaction || !roiTransaction) {
+                return next(new appError('Error while transaction for maturity amount', 500));
+            }
+            userMembership.status = 'Matured';
+            await userMembership.save({ validateBeforeSave: false });
+
+            // Send email to user
+            const userRow = await User.findById(userMembership.userId);
+            const membership = await Membership.findById(userMembership.membershipId);
+            const message = `Congratulations! Your plan is Matured and Invested amount and return is credited to you account \n
+            Plan Name: ${membership.planName} \n
+            Invested Amount: ${membership.price} \n
+            ROI Amount: ${userMembership.roiAmount} \n
+            Purchased On: ${userMembership.purchasedOn} \n
+            Maturity Date: ${userMembership.maturityDate}`;
+            try {
+                await sendEmail({
+                    email: userRow.email,
+                    subject: 'Your Plan is Matured and Amount Credited',
+                    message
+                });
+            } catch (err) {
+                console.log(err)
+            }
+        }
+    } catch (error) {
+        return next(new appError('Error while scheduling transaction for maturity amount', 500));
+    }
+})

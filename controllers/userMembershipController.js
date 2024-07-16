@@ -275,7 +275,7 @@ exports.getMembershipSalesReport = catchAsync(async (req, res, next) => {
 });
 
 // cron job to email send daily sales report
-cron.schedule('* * * * * *', async () => {
+cron.schedule('59 59 23 * * *', async () => {
     try {
         const endDate = new Date();
         const startDate = new Date();

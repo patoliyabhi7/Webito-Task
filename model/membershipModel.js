@@ -11,9 +11,13 @@ const membershipSchema = mongoose.Schema({
         required: [true, 'Amount is required'],
     },
     roi: {
-        type: String,
+        type: Number,
         required: [true, 'ROI is required'],
-    }
+    },
+    validity: {
+        type: Number,
+        required: [true, 'Validity is required'],
+    },
 })
 
 const Membership = mongoose.model('Membership', membershipSchema);

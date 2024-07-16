@@ -3,14 +3,15 @@ const catchAsync = require('../utils/catchAsync')
 const Membership = require('./../model/membershipModel')
 
 exports.addPlan = catchAsync(async (req, res, next) => {
-    const { planName, price, roi } = req.body;
-    if (!planName || !price || !roi) {
-        return next(new appError('Please provide all the details(planeName, price & roi)', 400))
+    const { planName, price, roi, validity } = req.body;
+    if (!planName || !price || !roi || !validity) {
+        return next(new appError('Please provide all the details(planeName, price, roi & validity)', 400))
     }
     const plan = await Membership.create({
         planName,
         price,
-        roi
+        roi,
+        validity
     })
     res.status(200).json({
         status: 'Plan added successfully!!',
@@ -56,7 +57,7 @@ exports.removePlan = catchAsync(async (req, res, next) => {
 })
 
 exports.updatePlan = catchAsync(async (req, res, next) => {
-    const plan = await Membership.findByIdAndUpdate(req.params.id, { planName: req.body.planName, price: req.body.price, roi: req.body.roi }, {new:true, runValidators: true } )
+    const plan = await Membership.findByIdAndUpdate(req.params.id, { planName: req.body.planName, price: req.body.price, roi: req.body.roi, validity: req.body.validity }, {new:true, runValidators: true } )
     if(!plan){
         return next(new appError('No plan found with this ID!', 404))
     }

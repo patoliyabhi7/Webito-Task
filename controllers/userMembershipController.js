@@ -8,60 +8,26 @@ const mongoose = require('mongoose');
 const cron = require('node-cron');
 
 exports.purchaseMembership = catchAsync(async (req, res, next) => {
-    const user = await User.findById(req.user.id).populate('membership_history').populate('membership_plan');
+    const user = await User.findById(req.user.id);
     if (!user) {
         return next(new appError('User not found or not logged in!!', 404))
     }
     const membership = await Membership.findById(req.params.m_id);
     if (!membership) {
-        return next(new appError('Membership not found!', 404));
+        return next(new appError('Membership Plan not found!', 404));
     }
+    maturity_date = new Date();
+    maturity_date.setDate(maturity_date.getDate() + membership.validity);
 
-    // Check if the user has an active membership
-    const now = new Date();
-    let activeMembership = null;
-    user.membership_history.forEach(m => {
-        if (m.membershipId && m.membershipId.toString() === membership._id.toString() && m.endDate > now) {
-            activeMembership = m;
-        }
-    });
+    investment_amount = membership.price;
+    roi_amount = (investment_amount * membership.roi / 100);
 
-    if (activeMembership) {
-        if (activeMembership.endDate > now) {
-            // If active membership, extend the end date by 30 days
-            activeMembership.endDate = new Date(activeMembership.endDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-            activeMembership.purchasedOrRenewedOn.push(now);
-            await activeMembership.save({ validateBeforeSave: false });
-
-            const message = `You have an existing membership of same plan, so your membership has been renewed and extended by 30 days. \n
-            Membership Name: ${membership.planName} \n
-            Amount: ${membership.price} \n
-            Start Date: ${activeMembership.startDate} \n
-            End Date: ${activeMembership.endDate}`;
-
-            try {
-                await sendEmail({
-                    email: user.email,
-                    subject: 'Membership Renewed Successfully!',
-                    message
-                });
-                return res.status(200).json({
-                    status: 'success',
-                    message: 'You have an existing membership of same plan, so your membership has been renewed and extended by 30 days.',
-                    data: {
-                        activeMembership
-                    }
-                });
-            } catch (err) {
-                return next(new appError('Error while sending the renewal email!', 500));
-            }
-        }
-    }
-    // Create a new membership if no active membership is found or if it has expired
     const userMembership = await UserMembership.create({
         userId: user.id,
         membershipId: req.params.m_id,
-        purchasedOrRenewedOn: [now]
+        maturityDate: maturity_date,
+        investedAmount: investment_amount,
+        roiAmount: roi_amount
     })
     if (!userMembership) {
         return next(new appError('Error while purchasing membership!', 500))
@@ -73,21 +39,22 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
     await user.save({ validateBeforeSave: false });
 
     // Send email to user
-    const message = `Congratulations! You have successfully purchased the membership. \n
-    Membership Name: ${membership.planName} \n
-    Amount: ${membership.price} \n
-    Start Date: ${userMembership.startDate} \n
-    End Date: ${userMembership.endDate}`;
+    const message = `Congratulations! You have successfully purchased the plan. \n
+    Plan Name: ${membership.planName} \n
+    Invested Amount: ${membership.price} \n
+    ROI Amount: ${userMembership.roiAmount} \n
+    Purchased On: ${userMembership.purchasedOn} \n
+    Maturity Date: ${userMembership.maturityDate}`;
 
     try {
         await sendEmail({
             email: user.email,
-            subject: 'Membership Purchase Successful!',
+            subject: 'Plan Purchase Successful!',
             message
         });
         res.status(201).json({
             status: 'success',
-            message: 'Membership purchase successful. Check your email for further details!',
+            message: 'Plan purchase successful. Check your email for further details!',
             data: {
                 userMembership
             }
@@ -128,17 +95,11 @@ exports.getMyMemberships = catchAsync(async (req, res, next) => {
             }
         },
         {
-            $unwind: {
-                path: '$membership_history.membershipId',
-                preserveNullAndEmptyArrays: true
-            }
-        },
-        {
             $group: {
                 _id: '$_id',
-                name: '$name',
-                email: '$email',
-                username: '$username',
+                name: { $first: '$name' },
+                email: { $first: '$email' },
+                username: { $first: '$username' },
                 membership_history: { $push: '$membership_history' }
             }
         }
@@ -187,22 +148,16 @@ exports.getMembershipDetailsByUId = catchAsync(async (req, res, next) => {
             }
         },
         {
-            $unwind: {
-                path: '$membership_history.membershipId',
-                preserveNullAndEmptyArrays: true
-            }
-        },
-        {
             $group: {
                 _id: '$_id',
-                name: '$name',
-                email: '$email',
-                username: '$username',
+                name: { $first: '$name' },
+                email: { $first: '$email' },
+                username: { $first: '$username' },
                 membership_history: { $push: '$membership_history' }
             }
         }
     ]);
-
+    
     if (!user || user.length === 0) {
         return next(new appError('Membership not found.', 404));
     }
@@ -224,11 +179,8 @@ const membershipSalesReport = async (startDate, endDate) => {
 
         return salesReport = await UserMembership.aggregate([
             {
-                $unwind: '$purchasedOrRenewedOn'
-            },
-            {
                 $match: {
-                    purchasedOrRenewedOn: {
+                    purchasedOn: {
                         $gte: startDate,
                         $lte: endDate
                     }
@@ -248,9 +200,9 @@ const membershipSalesReport = async (startDate, endDate) => {
             {
                 $group: {
                     _id: {
-                        year: { $year: '$purchasedOrRenewedOn' },
-                        month: { $month: '$purchasedOrRenewedOn' },
-                        day: { $dayOfMonth: '$purchasedOrRenewedOn' }
+                        year: { $year: '$purchasedOn' },
+                        month: { $month: '$purchasedOn' },
+                        day: { $dayOfMonth: '$purchasedOn' }
                     },
                     count: { $sum: 1 },
                     totalAmount: { $sum: '$membership_details.price' }
@@ -281,7 +233,6 @@ const membershipSalesReport = async (startDate, endDate) => {
         ]);
     } catch (error) {
         return next(new appError('Error while fetching sales report using function', 500));
-
     }
 };
 

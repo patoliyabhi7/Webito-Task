@@ -11,22 +11,28 @@ const userMembershipSchema = new mongoose.Schema({
         ref: 'Membership',
         required: [true, 'Membership ID is required']
     },
-    startDate: {
+    purchasedOn: {
         type: Date,
         default: Date.now,
-        required: [true, 'Start date is required']
+        required: [true, 'Purchase date is required']
     },
-    endDate: {
+    maturityDate: {
         type: Date,
-        default: function () {
-            return Date.now() + 30 * 24 * 60 * 60 * 1000;
-        },
-        required: [true, 'End date is required']
+        required: [true, 'Maturity date is required']
     },
-    purchasedOrRenewedOn: [{
-        type: Date,
-        required: [true, 'Purchase or renew date is required']
-    }]
+    investedAmount: {
+        type: Number,
+        required: [true, 'Invested amount is required']
+    },
+    roiAmount: {
+        type: Number,
+        required: [true, 'ROI amount is required']
+    },
+    status: {
+        type: String,
+        enum: ['Active', 'Inactive', 'Matured'],
+        default: 'Active'
+    }
 })
 
 const UserMembership = mongoose.model('UserMembership', userMembershipSchema)

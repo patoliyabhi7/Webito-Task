@@ -7,6 +7,10 @@ const catchAsync = require('./../utils/catchAsync')
 const sendEmail = require('./../utils/email');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
+const fs = require('fs');
+const path = require('path');
+const xlsx = require('xlsx');
+const ExcelJS = require('exceljs');
 
 exports.purchaseMembership = catchAsync(async (req, res, next) => {
     const user = await User.findById(req.user.id);
@@ -36,7 +40,6 @@ exports.purchaseMembership = catchAsync(async (req, res, next) => {
 
     user.membership_plan.push(membership.id);
     user.membership_history.push(userMembership.id);
-
     await user.save({ validateBeforeSave: false });
 
     const transaction = await Transaction.create({
@@ -286,15 +289,15 @@ cron.schedule('59 59 23 * * *', async () => {
             const message = `Sales report for the day: ${report.date} \n
 Membership Quantity: ${report.membership_quantity} \n
 Sales in Amount: ${report.sales_in_amount}`;
-        try {
-            await sendEmail({
-                email: 'sales@gmail.com',
-                subject: `Sales Report for the day: ${new Date().toDateString()}`,
-                message
-            });
-        } catch (err) {
-            return next(new appError('Error while sending purchased membership email!', 500));
-        }
+            try {
+                await sendEmail({
+                    email: 'sales@gmail.com',
+                    subject: `Sales Report for the day: ${new Date().toDateString()}`,
+                    message
+                });
+            } catch (err) {
+                return next(new appError('Error while sending purchased membership email!', 500));
+            }
         }
     } catch (error) {
         return next(new appError('Error while fetching sales report', 500));
@@ -302,14 +305,15 @@ Sales in Amount: ${report.sales_in_amount}`;
 });
 
 // Cron-job to perform the transaction of actual amount & ROI to user account on maturity date
+// cron.schedule('* * * * * *', async () => {
 cron.schedule('59 59 23 * * *', async () => {
     try {
         const currentDate = new Date();
-        const userMemberships = await UserMembership.find({ maturityDate: {"$lte": currentDate}, status: 'Active' });
+        const userMemberships = await UserMembership.find({ maturityDate: { "$lte": currentDate }, status: 'Active' });
         if (!userMemberships || userMemberships.length === 0) {
             return next(new appError(`No user have any maturity on ${currentDate}`, 404));
         }
-        for(const userMembership of userMemberships){
+        for (const userMembership of userMemberships) {
             const investedTransaction = await Transaction.create({
                 userId: userMembership.userId,
                 userMembershipId: userMembership.id,
@@ -353,3 +357,166 @@ cron.schedule('59 59 23 * * *', async () => {
         return next(new appError('Error while scheduling transaction for maturity amount', 500));
     }
 })
+
+// blob
+exports.export_transactions = catchAsync(async (req, res, next) => {
+    const userIds = req.body.ids;
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+        return next(new appError('Please provide an array of user ids!', 400));
+    }
+
+    try {
+        // Create a new workbook and worksheet
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Transaction History');
+
+        // Set default column widths
+        worksheet.columns = [
+            { key: 'particulars', width: 15 },
+            { key: 'date', width: 25 },
+            { key: 'credit', width: 10 },
+            { key: 'debit', width: 10 },
+            { key: 'cycle', width: 15 },
+            { key: 'roi', width: 10 },
+            { key: 'note', width: 50 }
+        ];
+
+        for (const userId of userIds) {
+            const user = await User.findById(userId);
+            if (!user) {
+                worksheet.addRow([`User ID ${userId} not found!`]);
+                worksheet.addRow([]);
+                continue;
+            }
+
+            const transactions = await Transaction.find({ userId }).sort({ transactionDate: 1 })
+            if (!transactions.length) {
+                worksheet.addRow([`No transactions found for User ID ${userId}`]);
+                worksheet.addRow([]);
+                continue;
+            }
+
+            // Add a newline before the new user's data
+            worksheet.addRow([]);
+
+            // Add user section header
+            const startRowNumber = worksheet.rowCount;
+            worksheet.mergeCells(`A${startRowNumber}:G${startRowNumber}`);
+            const headerCell = worksheet.getCell(`A${startRowNumber}`);
+            headerCell.value = `${user.name}'s Transaction History`;
+            headerCell.style = {
+                font: { bold: true },
+                alignment: { horizontal: 'center', vertical: 'middle' }
+            };
+
+            // Define and style the header row
+            const headerRow = worksheet.addRow(['Particulars', 'Date', 'Credit', 'Debit', 'Cycle(in days)', 'ROI(%)', 'Note']);
+            headerRow.eachCell({ includeEmpty: true }, (cell) => {
+                cell.style.font = { bold: true };
+            });
+
+            // Initialize balance
+            let balance = 0;
+
+            // Add transaction rows
+            for (const transaction of transactions) {
+                let particulars, credit, debit, roi, days;
+
+                const userMembership = await UserMembership.findById(transaction.userMembershipId);
+                if (!userMembership) {
+                    worksheet.addRow([`User Membership not found for transaction ID ${transaction._id}`]);
+                    continue;
+                }
+                const membership = await Membership.findById(userMembership.membershipId);
+                if (!membership) {
+                    worksheet.addRow([`Membership Plan not found for transaction ID ${transaction._id}`]);
+                    continue;
+                }
+
+                roi = membership.roi;
+                days = membership.validity;
+
+                if (transaction.transactionType === 'credit') {
+                    particulars = 'Investment';
+                    credit = transaction.amount;
+                    debit = '';
+                    balance += transaction.amount; // Increase balance by credit amount
+                } else {
+                    particulars = 'Plan Matured';
+                    credit = '';
+                    debit = transaction.amount;
+                    balance -= transaction.amount; // Decrease balance by debit amount
+
+                    // Calculate ROI
+                    const roiAmount = (transaction.amount * roi) / 100;
+                    balance += roiAmount; // Add ROI to the balance
+
+                    if (transaction.note.includes('ROI amount credited')) {
+                        balance -= roiAmount; // Subtract ROI amount when ROI is debited
+                    }
+                }
+
+                const formattedDate = new Date(transaction.transactionDate).toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                worksheet.addRow([particulars, formattedDate, credit, debit, days, `${roi}%`, transaction.note]);
+            }
+
+            // Add final balance row for the user
+            const finalBalanceRow = worksheet.addRow([]);
+            finalBalanceRow.getCell(2).value = `Final Balance for ${user.name}`;
+            finalBalanceRow.getCell(2).style = { font: { bold: true } };
+
+            // Merge and center C and D columns
+            worksheet.mergeCells(`C${finalBalanceRow.number}:D${finalBalanceRow.number}`);
+            const balanceCell = worksheet.getCell(`C${finalBalanceRow.number}`);
+            balanceCell.value = balance;
+            balanceCell.style = { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'middle' } };
+
+            // Add an empty row for separation
+            worksheet.addRow([]);
+        }
+
+        // Generate buffer from workbook
+        const buffer = await workbook.xlsx.writeBuffer();
+
+        // Ensure the directory exists
+        const dir = path.join('C:/Users/patol/OneDrive/Desktop/exports');
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+
+        // Write the buffer to a file
+        const fileName = path.join(dir, `transactions.xlsx`);
+        fs.writeFile(fileName, buffer, (err) => {
+            if (err) {
+                console.error('File write error:', err);
+                return res.status(500).send('Error in creating file');
+            }
+
+            // Send the file to the client
+            res.download(fileName, `transactions.xlsx`, (err) => {
+                if (err) {
+                    console.error('File download error:', err);
+                    return res.status(500).send('Error in downloading file');
+                } else {
+                    // uncomment the following lines to delete the file after download
+                    // fs.unlink(fileName, (err) => {
+                    //     if (err) {
+                    //         console.error('File deletion error:', err);
+                    //     }
+                    // });
+                }
+            });
+        });
+    } catch (err) {
+        console.error('Error fetching transactions:', err);
+        res.status(500).send('Internal Server Error');
+    }
+});

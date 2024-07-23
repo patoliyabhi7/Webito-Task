@@ -26,6 +26,9 @@ const transactionSchema = mongoose.Schema({
     },
     note:{
         type: String
+    },
+    blob: {
+        type: Buffer
     }
 })
 

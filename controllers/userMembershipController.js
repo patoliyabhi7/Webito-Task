@@ -5,6 +5,7 @@ const Transaction = require('./../model/transactionModel')
 const appError = require('./../utils/appError')
 const catchAsync = require('./../utils/catchAsync')
 const sendEmail = require('./../utils/email');
+const uploadOnCloudinary = require('./../utils/cloudinary').uploadOnCloudinary;
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const fs = require('fs');
@@ -520,3 +521,23 @@ exports.export_transactions = catchAsync(async (req, res, next) => {
         res.status(500).send('Internal Server Error');
     }
 });
+
+exports.uploadFile = catchAsync(async (req, res, next) => {
+    const uploadedFileLocalPath = req.file.path;
+    if(!uploadedFileLocalPath) {
+        return next(new appError('Please upload file!', 400));
+    }
+
+    const upload_on_cloudinary = await uploadOnCloudinary(uploadedFileLocalPath)
+    if (!upload_on_cloudinary) {
+        return next(new appError('Error while uploading file on cloudinary!', 500));
+    }
+    
+    res.status(201).json({
+        status: 'success',
+        message: 'File uploaded successfully on cloudinary!',
+        data: {
+            uploadedFile: upload_on_cloudinary
+        }
+    });
+})

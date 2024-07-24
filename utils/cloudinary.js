@@ -7,12 +7,6 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-console.log('Cloudinary Configuration:');
-console.log('CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME);
-console.log('API_KEY:', process.env.CLOUDINARY_API_KEY);
-console.log('API_SECRET:', process.env.CLOUDINARY_API_SECRET);
-
-
 exports.uploadOnCloudinary = async function (localFilePath) {
     try {
         if (!localFilePath) return null;

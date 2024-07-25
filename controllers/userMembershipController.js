@@ -12,6 +12,9 @@ const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
 const ExcelJS = require('exceljs');
+const sharp = require('sharp');
+const ffmpeg = require('fluent-ffmpeg');
+const { PDFDocument } = require('pdf-lib');
 
 exports.purchaseMembership = catchAsync(async (req, res, next) => {
     const user = await User.findById(req.user.id);
@@ -522,22 +525,78 @@ exports.export_transactions = catchAsync(async (req, res, next) => {
     }
 });
 
+//compressing the size of files uploading on the cloudinary
+const compressImage = async (filePath, outputFilePath) => {
+    await sharp(filePath)
+        .resize({ width: 600 })
+        .toFormat('jpeg', { quality: 50 })
+        .toFile(outputFilePath);
+};
+
+const compressVideo = async (filePath, outputFilePath) => {
+    return new Promise((resolve, reject) => {
+        ffmpeg(filePath)
+            .output(outputFilePath)
+            .videoCodec('libx264')
+            .size('640x?')
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+    });
+};
+
+const compressPDF = async (filePath, outputFilePath) => {
+    const pdfDoc = await PDFDocument.load(fs.readFileSync(filePath));
+    const pages = pdfDoc.getPages();
+    pages.forEach(page => {
+        page.scale(0.5, 0.5);
+    });
+    const pdfBytes = await pdfDoc.save();
+    fs.writeFileSync(outputFilePath, pdfBytes);
+};
+
 exports.uploadFile = catchAsync(async (req, res, next) => {
-    const uploadedFileLocalPath = req.file.path;
-    if(!uploadedFileLocalPath) {
+    let uploadedFileLocalPath = req.file.path;
+    if (!uploadedFileLocalPath) {
         return next(new appError('Please upload file!', 400));
     }
 
-    const upload_on_cloudinary = await uploadOnCloudinary(uploadedFileLocalPath)
-    if (!upload_on_cloudinary) {
-        return next(new appError('Error while uploading file on cloudinary!', 500));
-    }
-    
-    res.status(201).json({
-        status: 'success',
-        message: 'File uploaded successfully on cloudinary!',
-        data: {
-            uploadedFile: upload_on_cloudinary
+    const ext = path.extname(uploadedFileLocalPath).toLowerCase();
+    const compressedFilePath = path.join(__dirname, './../public/uploads', `compressed-${req.file.filename}`);
+
+    try {
+        if (['.jpg', '.jpeg', '.png'].includes(ext)) {
+            await compressImage(uploadedFileLocalPath, compressedFilePath);
+        } else if (['.mp4', '.mov'].includes(ext)) {
+            await compressVideo(uploadedFileLocalPath, compressedFilePath);
+        } else if (['.pdf'].includes(ext)) {
+            await compressPDF(uploadedFileLocalPath, compressedFilePath);
+        } else {
+            //for other file types upload on cloudinary without compressing
+            fs.copyFileSync(uploadedFileLocalPath, compressedFilePath);
         }
-    });
-})
+
+        fs.unlinkSync(uploadedFileLocalPath);
+        uploadedFileLocalPath = compressedFilePath;
+
+        const upload_on_cloudinary = await uploadOnCloudinary(uploadedFileLocalPath);
+        if (!upload_on_cloudinary) {
+            throw new Error('Error while uploading file on cloudinary!');
+        }
+
+        // fs.unlinkSync(compressedFilePath);
+
+        res.status(201).json({
+            status: 'success',
+            message: 'File uploaded successfully on cloudinary!',
+            data: {
+                uploadedFile: upload_on_cloudinary
+            }
+        });
+    } catch (error) {
+        if (fs.existsSync(compressedFilePath)) {
+            fs.unlinkSync(compressedFilePath);
+        }
+        next(new appError(error.message, 500));
+    }
+});

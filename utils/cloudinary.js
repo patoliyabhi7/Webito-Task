@@ -16,7 +16,7 @@ exports.uploadOnCloudinary = async function (localFilePath) {
             resource_type: "auto"
         })
 
-        // file has been uploaded to cloudinary so remove the locally saved temp file
+        //file has uploaded to cloudinary so remove the locally saved temp file
         fs.unlinkSync(localFilePath)
 
         console.log("file has been uploaded to cloudinary", response.url);
